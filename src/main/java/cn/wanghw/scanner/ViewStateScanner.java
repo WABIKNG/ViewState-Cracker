@@ -44,10 +44,10 @@ public class ViewStateScanner implements ScanCheck {
 
     private AuditResult startScan(HttpRequestResponse httpRequestResponse, boolean active) {
         VSCAuditResult result = new VSCAuditResult();
-        String hostAndPort = String.format("%s:%s", httpRequestResponse.httpService().host(), httpRequestResponse.httpService().port());
-        if (!isScanned(hostAndPort)) {
-            ViewStateData viewStateData = parseViewState(httpRequestResponse);
-            if (viewStateData != null) {
+        ViewStateData viewStateData = parseViewState(httpRequestResponse);
+        if (viewStateData != null) {
+            String hostAndPort = String.format("%s:%s", httpRequestResponse.httpService().host(), httpRequestResponse.httpService().port());
+            if (!isScanned(hostAndPort)) {
                 if (ViewStateParser.isWithoutMACViewState(viewStateData.getViewState())) {
                     result.addAuditIssue(new ViewStateWithoutMacIssue(httpRequestResponse.httpService(), httpRequestResponse));
                 } else {
