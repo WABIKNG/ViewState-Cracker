@@ -5,6 +5,7 @@ import burp.api.montoya.http.message.params.HttpParameterType;
 import burp.api.montoya.http.message.params.ParsedHttpParameter;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
+import burp.api.montoya.utilities.URLUtils;
 import cn.wanghw.models.ViewStateData;
 
 import java.util.List;
@@ -24,10 +25,11 @@ public class ViewStateExtractor {
     public ViewStateData parseRequest(HttpRequest info) {
         if (!info.hasParameter(VIEW_STATE_PARAMETER_NAME, HttpParameterType.BODY))
             return null;
+        URLUtils urlUtils = CommonUtil.montoyaApi.utilities().urlUtils();
         ViewStateData viewState = new ViewStateData();
         List<ParsedHttpParameter> params = info.parameters();
         for (ParsedHttpParameter param : params) {
-            fillParams(param.name(), CommonUtil.montoyaApi.utilities().urlUtils().decode(param.value()), viewState);
+            fillParams(param.name(), param.value().contains("%") ? urlUtils.decode(param.value()) : param.value(), viewState);
         }
         return viewState;
     }
