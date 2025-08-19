@@ -40,7 +40,7 @@ public class ViewStateExtractor {
         return parseFromHtml(info.bodyToString());
     }
 
-    private ViewStateData parseFromHtml(String bodyHtml) {
+    private static ViewStateData parseFromHtml(String bodyHtml) {
         ViewStateData viewState = new ViewStateData();
         Matcher matcher = pattern.matcher(bodyHtml);
         while (matcher.find()) {
@@ -55,7 +55,7 @@ public class ViewStateExtractor {
         else return null;
     }
 
-    private void fillParams(String name, String value, ViewStateData viewState) {
+    private static void fillParams(String name, String value, ViewStateData viewState) {
         if (name == null)
             return;
         if (!name.startsWith("__"))
@@ -69,5 +69,35 @@ public class ViewStateExtractor {
         } else if (EVENT_VALIDATION_PARAMETER_NAME.equals(name)) {
             viewState.setEventValidation(value);
         }
+    }
+
+    public static void main(String[] args) {
+        System.out.println(parseFromHtml("\n" +
+                "\n" +
+                "<!DOCTYPE html>\n" +
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n" +
+                "<head><title>\n" +
+                "\n" +
+                "</title></head>\n" +
+                "<body>\n" +
+                "    <form method=\"post\" action=\"./login.aspx\" id=\"form1\">\n" +
+                "<div class=\"aspNetHidden\">\n" +
+                "<input type=\"hidden\" name=\"__VIEWSTATE\" id=\"__VIEWSTATE\" value=\"d1g4z2kvYE5P77amHx8qKGsKdun1FT9K2vlMSHVtODY662E5f+zsFowIxnbQM1CkrKyWq3yqonHSS6oHWHslQq2FTwXelH0i2QK3f7R0FTZDmLbQ\" />\n" +
+                "</div>\n" +
+                "\n" +
+                "<div class=\"aspNetHidden\">\n" +
+                "\n" +
+                "\t<input type=\"hidden\" name=\"__VIEWSTATEGENERATOR\" id=\"__VIEWSTATEGENERATOR\" value=\"C2EE9ABB\" />\n" +
+                "\t<input type=\"hidden\" name=\"__VIEWSTATEENCRYPTED\" id=\"__VIEWSTATEENCRYPTED\" value=\"\" />\n" +
+                "\t<input type=\"hidden\" name=\"__EVENTVALIDATION\" id=\"__EVENTVALIDATION\" value=\"SSFqk6FnlCo7Xcus0teFxr495k/FJSIVyqLVmfLRFMWlDbNj3INC7SlBQJZTzlMwZ3liMcbZ2BdeOqwH5v8GS7PjFvhlLvK0vkho20Qwpg0DDkei8+iWpFkW/uIx1I3ePUuCDQ==\" />\n" +
+                "</div>\n" +
+                "        <textarea name=\"TextArea1\" rows=\"5\" cols=\"50\" id=\"TextArea1\">\n" +
+                "11</textarea>\n" +
+                "        <input type=\"submit\" name=\"Button1\" value=\"GO\" id=\"Button1\" class=\"btn\" />\n" +
+                "  <br />\n" +
+                "        <span id=\"Label1\">11</span>\n" +
+                "    </form>\n" +
+                "</body>\n" +
+                "</html>"));
     }
 }

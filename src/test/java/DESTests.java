@@ -17,7 +17,7 @@ public class DESTests {
                 "280450BB36319B474C996B506A95AEDF9B51211B1D2B7A87",
                 "DES",
                 "5A108D17",
-                true));
+                true, ""));
         if (!val.equals("/wEPDwUKMTY3NzE5MjIyMGRk"))
             throw new Exception(val);
         else {

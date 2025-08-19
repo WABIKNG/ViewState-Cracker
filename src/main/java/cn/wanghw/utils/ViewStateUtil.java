@@ -2,6 +2,7 @@ package cn.wanghw.utils;
 
 import cn.wanghw.models.BruteResult;
 import cn.wanghw.models.KeyPair;
+import cn.wanghw.models.Purpose;
 import cn.wanghw.models.ViewStateData;
 
 import java.io.ByteArrayOutputStream;
@@ -80,6 +81,88 @@ public class ViewStateUtil {
         return validationAlgorithm.equalsIgnoreCase("AES") || validationAlgorithm.equalsIgnoreCase("TripleDES") || validationAlgorithm.equalsIgnoreCase("3DES");
     }
 
+    public static boolean isLegacyValidationAlgo(String validationAlgorithm) {
+        return isSymAlgo(validationAlgorithm) || validationAlgorithm.equalsIgnoreCase("MD5");
+    }
+
+    public static void verifyAndDecryptViewState(
+            ViewStateData viewStateData,
+            BruteResult bruteResult
+    ) throws Exception {
+        byte[] viewStateBytes = Base64.decode(viewStateData.getViewState());
+        int macLength = ValidationHashSizeMap.get(String.valueOf(bruteResult.getValidationAlgorithm()).toUpperCase());
+        boolean isSymAlgo = isSymAlgo(bruteResult.getValidationAlgorithm());
+        if (viewStateBytes.length < macLength) {
+            throw new Exception("Invalid ViewState: too short for MAC");
+        }
+        byte[] providedMac = Arrays.copyOfRange(viewStateBytes, viewStateBytes.length - macLength, viewStateBytes.length);
+        byte[] dataForMac = Arrays.copyOfRange(viewStateBytes, 0, viewStateBytes.length - macLength);
+        byte[] validationKeyBytes = hexStringToByteArray(bruteResult.getValidationKeyHex());
+        byte[] decryptionKeyBytes = hexStringToByteArray(bruteResult.getDecryptionKeyHex());
+        byte[] modifierBytes = reverse(hexStringToByteArray(viewStateData.getViewStateGenerator()));
+        byte[] computedMac;
+        if (isSymAlgo) {
+            byte[] data1 = decrypt(dataForMac, decryptionKeyBytes, DecryptionAlgoMap.get(bruteResult.getValidationAlgorithm()));
+            dataForMac = Arrays.copyOfRange(data1, 0, data1.length - macLength);
+            providedMac = Arrays.copyOfRange(data1, data1.length - macLength, data1.length);
+        }
+        String javaMacAlgorithm = ValidationAlgoMap.getOrDefault(bruteResult.getValidationAlgorithm().toUpperCase(), bruteResult.getValidationAlgorithm());
+        if (javaMacAlgorithm.equalsIgnoreCase("MD5")) {
+            MessageDigest md5 = MessageDigest.getInstance("MD5");
+            md5.update(comboBytes(
+                    dataForMac,
+                    validationKeyBytes,
+                    viewStateData.isViewStateEncrypted() ? new byte[0] : new byte[]{0, 0, 0, 0}
+            ));
+            computedMac = md5.digest();
+        } else {
+            byte[] payload = viewStateData.isViewStateEncrypted() ? dataForMac : comboBytes(dataForMac, modifierBytes);
+            Mac mac = Mac.getInstance(javaMacAlgorithm);
+            mac.init(new SecretKeySpec(validationKeyBytes, javaMacAlgorithm));
+            computedMac = mac.doFinal(payload);
+        }
+        if (!Arrays.equals(computedMac, providedMac)) {
+            if (!isLegacyValidationAlgo(bruteResult.getValidationKeyHex())) {
+                Purpose[] purposes = getPurposeByPath(viewStateData.getPath());
+                for (Purpose purpose : purposes) {
+                    byte[] decryptionDeriveKey = SP800_108.deriveKey(decryptionKeyBytes, purpose);
+                    byte[] validationDeriveKey = SP800_108.deriveKey(validationKeyBytes, purpose);
+                    Mac mac = Mac.getInstance(javaMacAlgorithm);
+                    mac.init(new SecretKeySpec(validationDeriveKey, javaMacAlgorithm));
+                    computedMac = mac.doFinal(dataForMac);
+                    if (Arrays.equals(computedMac, providedMac)) {
+                        if (bruteResult.getDecryptionAlgorithm() == null) {
+                            for (String decAlgo : DecryptionAlgorithms) {
+                                try {
+                                    bruteResult.setLosFormatterPayload(Base64.encode(decryptFor4Dot5(dataForMac, decryptionDeriveKey, decAlgo)));
+                                    bruteResult.setPurpose(purpose);
+                                    bruteResult.setDecryptionAlgorithm(decAlgo);
+                                    bruteResult.setSuccess(true);
+                                    return;
+                                } catch (Exception e) {
+                                    // ignore
+                                }
+                            }
+                        } else {
+                            bruteResult.setLosFormatterPayload(Base64.encode(decryptFor4Dot5(dataForMac, decryptionDeriveKey, bruteResult.getDecryptionAlgorithm())));
+                            bruteResult.setPurpose(purpose);
+                            bruteResult.setSuccess(true);
+                            return;
+                        }
+                    }
+                }
+            }
+            throw new Exception("MAC verification failed");
+        } else {
+            if (viewStateData.isViewStateEncrypted()) {
+                dataForMac = decrypt(dataForMac, decryptionKeyBytes, DecryptionAlgoMap.get(bruteResult.getDecryptionAlgorithm()));
+            }
+            bruteResult.setLosFormatterPayload(Base64.encode(dataForMac));
+            bruteResult.setModifier(viewStateData.getViewStateGenerator());
+            bruteResult.setSuccess(true);
+        }
+    }
+
     public static byte[] verifyAndDecryptViewState(
             String viewState,
             String validationKeyHex,
@@ -87,7 +170,8 @@ public class ViewStateUtil {
             String decryptionKeyHex,
             String decryptionAlgorithm,
             String modifier,
-            boolean isEncrypted
+            boolean isEncrypted,
+            String path
     ) throws Exception {
         byte[] viewStateBytes = Base64.decode(viewState);
         int macLength = ValidationHashSizeMap.get(String.valueOf(validationAlgorithm).toUpperCase());
@@ -122,15 +206,38 @@ public class ViewStateUtil {
             computedMac = mac.doFinal(payload);
         }
         if (!Arrays.equals(computedMac, providedMac)) {
+            if (!isLegacyValidationAlgo(validationAlgorithm)) {
+                Purpose[] purposes = getPurposeByPath(path);
+                for (Purpose purpose : purposes) {
+                    byte[] decryptionDeriveKey = SP800_108.deriveKey(decryptionKeyBytes, purpose);
+                    byte[] validationDeriveKey = SP800_108.deriveKey(validationKeyBytes, purpose);
+                    Mac mac = Mac.getInstance(javaMacAlgorithm);
+                    mac.init(new SecretKeySpec(validationDeriveKey, javaMacAlgorithm));
+                    computedMac = mac.doFinal(dataForMac);
+                    if (Arrays.equals(computedMac, providedMac)) {
+                        if (decryptionAlgorithm == null) {
+                            for (String decAlgo : DecryptionAlgorithms) {
+                                try {
+                                    return decryptFor4Dot5(dataForMac, decryptionDeriveKey, decAlgo);
+                                } catch (Exception e) {
+                                    // ignore
+                                }
+                            }
+                        }
+                        return decryptFor4Dot5(dataForMac, decryptionDeriveKey, decryptionAlgorithm);
+                    }
+                }
+            }
             throw new Exception("MAC verification failed");
-        }
-        if (isEncrypted) {
-            dataForMac = decrypt(dataForMac, decryptionKeyBytes, DecryptionAlgoMap.get(decryptionAlgorithm));
+        } else {
+            if (isEncrypted) {
+                dataForMac = decrypt(dataForMac, decryptionKeyBytes, DecryptionAlgoMap.get(decryptionAlgorithm));
+            }
         }
         return dataForMac;
     }
 
-    private static byte[] comboBytes(byte[]... bytes) {
+    public static byte[] comboBytes(byte[]... bytes) {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         for (byte[] b : bytes) {
             bos.writeBytes(b);
@@ -138,7 +245,7 @@ public class ViewStateUtil {
         return bos.toByteArray();
     }
 
-    private static byte[] decrypt(byte[] data, byte[] key, String cipherAlgorithm) throws Exception {
+    public static byte[] decrypt(byte[] data, byte[] key, String cipherAlgorithm) throws Exception {
         int blockSize = cipherAlgorithm.equals("AES") ? 16 : 8;
         int paddedLength = ((data.length + blockSize - 1) / blockSize) * blockSize;
         byte[] paddedData = new byte[paddedLength];
@@ -158,7 +265,26 @@ public class ViewStateUtil {
         return body;
     }
 
-    private static int RoundupNumBitsToNumBytes(int numBits) {
+    public static byte[] decryptFor4Dot5(byte[] data, byte[] key, String cipherAlgorithm) throws Exception {
+        int blockSize = cipherAlgorithm.equals("AES") ? 16 : 8;
+        byte[] iv = new byte[blockSize];
+        System.arraycopy(data, 0, iv, 0, iv.length);
+        byte[] pureData = new byte[data.length - blockSize];
+        System.arraycopy(data, iv.length, pureData, 0, pureData.length);
+        int paddedLength = ((pureData.length + blockSize - 1) / blockSize) * blockSize;
+        byte[] paddedData = new byte[paddedLength];
+        System.arraycopy(pureData, 0, paddedData, 0, pureData.length);
+        Cipher cipher = Cipher.getInstance(cipherAlgorithm + "/CBC/PKCS5Padding");
+        if (cipherAlgorithm.equals("DES"))
+            key = Arrays.copyOfRange(key, 0, 8);
+        SecretKeySpec keySpec = new SecretKeySpec(key, cipherAlgorithm);
+        IvParameterSpec ivSpec = new IvParameterSpec(iv);
+        cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec);
+        byte[] decrypted = cipher.doFinal(paddedData);
+        return decrypted;
+    }
+
+    public static int RoundupNumBitsToNumBytes(int numBits) {
         return numBits < 0 ? 0 : numBits / 8 + ((numBits & 7) != 0 ? 1 : 0);
     }
 
@@ -194,17 +320,125 @@ public class ViewStateUtil {
     private static void bruteWithAlgorithm(ViewStateData viewStateData, BruteResult bruteResult, String valAlgo, String decAlgo) {
         for (KeyPair mk : machineKeys) {
             try {
-                byte[] payload = verifyAndDecryptViewState(viewStateData.getViewState(), mk.getValidationKey(), valAlgo, mk.getDecryptionKey(), decAlgo, viewStateData.getViewStateGenerator(), viewStateData.isViewStateEncrypted());
-                bruteResult.setLosFormatterPayload(Base64.encode(payload));
                 bruteResult.setValidationKeyHex(mk.getValidationKey());
                 bruteResult.setDecryptionKeyHex(mk.getDecryptionKey());
                 bruteResult.setValidationAlgorithm(valAlgo);
                 bruteResult.setDecryptionAlgorithm(decAlgo);
-                bruteResult.setSuccess(true);
+                verifyAndDecryptViewState(viewStateData, bruteResult);
                 return;
             } catch (Exception e) {
                 // ignore
             }
         }
+    }
+
+    private static String simulateTemplateSourceDirectory(String strPath) {
+        String result = strPath;
+
+        if (result == null || result.isEmpty()) {
+            return "";
+        }
+
+        if (!result.startsWith("/")) {
+            result = "/" + result;
+        }
+
+        int lastDotIndex = result.lastIndexOf('.');
+        int lastSlashIndex = result.lastIndexOf('/');
+        if (lastDotIndex > lastSlashIndex && lastSlashIndex != -1) {
+            result = result.substring(0, lastSlashIndex + 1);
+        }
+
+        result = removeSlashFromPathIfNeeded(result);
+
+        return result;
+    }
+
+    private static String simulateGetTypeName(String strPath, String IISAppInPath) {
+        if (strPath == null || strPath.isEmpty()) {
+            return "";
+        }
+
+        String result = strPath;
+
+        if (!result.startsWith("/")) {
+            result = "/" + result;
+        }
+
+        if (!result.toLowerCase().endsWith(".aspx")) {
+            result += "/default.aspx";
+        }
+
+        IISAppInPath = IISAppInPath == null ? "" : IISAppInPath.toLowerCase();
+        if (!IISAppInPath.startsWith("/")) {
+            IISAppInPath = "/" + IISAppInPath;
+        }
+        if (!IISAppInPath.endsWith("/")) {
+            IISAppInPath += "/";
+        }
+
+        String lowerResult = result.toLowerCase();
+        if (lowerResult.contains(IISAppInPath)) {
+            int index = lowerResult.indexOf(IISAppInPath) + IISAppInPath.length();
+            result = result.substring(index);
+        }
+
+        if (result.startsWith("/")) {
+            result = result.substring(1);
+        }
+
+        result = result.replace('.', '_').replace('/', '_');
+        result = removeSlashFromPathIfNeeded(result);
+
+        return result;
+    }
+
+    private static String canonThePath(String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        // 替换反斜杠为正斜杠
+        path = path.replace('\\', '/');
+        // 合并连续斜杠
+        path = Pattern.compile("/+").matcher(path).replaceAll("/");
+        return path;
+    }
+
+    private static String removeSlashFromPathIfNeeded(String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        int length = path.length();
+        if (length > 1 && path.endsWith("/")) {
+            return path.substring(0, length - 1);
+        }
+        return path;
+    }
+
+    private static Purpose[] getPurposeByPath(String path) {
+        if (path == null || path.isEmpty())
+            return new Purpose[0];
+        String paths = simulateTemplateSourceDirectory(path);
+        List<Purpose> purposes = new ArrayList<>();
+        if (!paths.equalsIgnoreCase("/")) {
+            String[] pathArray = paths.split("/");
+            for (int i = 0; i < pathArray.length; i++) {
+                purposes.add(getPurpose(path, String.join("/", Arrays.copyOfRange(pathArray, 0, i + 1))));
+            }
+        } else {
+            purposes.add(getPurpose(path, "/"));
+        }
+        return purposes.toArray(new Purpose[0]);
+    }
+
+    private static Purpose getPurpose(String path, String appPath) {
+        if (appPath == null || appPath.isEmpty())
+            appPath = "/";
+        List<String> specificPurposes = new ArrayList<>();
+        String newTargetPagePath = simulateTemplateSourceDirectory(path);
+        newTargetPagePath = newTargetPagePath == null ? "/" : newTargetPagePath;
+        specificPurposes.add("TemplateSourceDirectory: " + newTargetPagePath.toUpperCase());
+        specificPurposes.add("Type: " + simulateGetTypeName(path, appPath).toUpperCase());
+        return new Purpose(specificPurposes.toArray(new String[0]), path, appPath);
     }
 }

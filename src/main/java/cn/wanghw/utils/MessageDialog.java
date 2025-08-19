@@ -29,7 +29,7 @@ public class MessageDialog extends JDialog {
         Toolkit t = Toolkit.getDefaultToolkit();
         Dimension d = t.getScreenSize();
         this.setResizable(true);
-        this.setSize(600, 400);
+        this.setSize(630, 420);
         this.setLocation((d.width - this.getWidth()) / 2,
                 (d.height - this.getHeight()) / 2);
         this.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
