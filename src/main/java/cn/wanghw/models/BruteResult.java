@@ -86,6 +86,9 @@ public class BruteResult {
                 sb.append(String.format("DecryptionKey: <b>%s</b><br>", decryptionKeyHex));
                 sb.append(String.format("DecryptionAlgorithm: <b>%s</b><br>", validationAlgorithm));
             }
+            if (modifier != null) {
+                sb.append(String.format("Modifier: <b>%s</b><br>", modifier));
+            }
             if (purpose != null) {
                 sb.append(String.format("Purpose.Path: <b>%s</b><br>", purpose.getPath()));
                 sb.append(String.format("Purpose.AppPath: <b>%s</b><br>", purpose.getAppPath()));
