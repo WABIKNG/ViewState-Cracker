@@ -122,7 +122,7 @@ public class ViewStateUtil {
             computedMac = mac.doFinal(payload);
         }
         if (!Arrays.equals(computedMac, providedMac)) {
-            if (!isLegacyValidationAlgo(bruteResult.getValidationKeyHex())) {
+            if (!isLegacyValidationAlgo(bruteResult.getValidationAlgorithm())) {
                 Purpose[] purposes = getPurposeByPath(viewStateData.getPath());
                 for (Purpose purpose : purposes) {
                     byte[] decryptionDeriveKey = SP800_108.deriveKey(decryptionKeyBytes, purpose);
